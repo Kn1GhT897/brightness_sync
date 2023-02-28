@@ -1,5 +1,5 @@
 run: build
-	./brightness_sync
+	./target/brightness_sync
 	
 build: main.c
 	gcc -O3 main.c -o brightness_sync
