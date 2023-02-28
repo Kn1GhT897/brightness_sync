@@ -63,9 +63,10 @@ int main() {
     }
 
     for (;;) {
-        if (epoll_wait(epfd, events, 1, -1) == -1) {
-            _throw_return("epoll_wait", -1);
-        }
+        int nr;
+        do {
+            nr = epoll_wait(epfd, events, 1, -1);
+        } while (nr < 0 && errno == EINTR);
         
         len = read(fd, buf, sizeof(buf));
         if (len == -1) {
