@@ -11,11 +11,12 @@ void change_brightness() {
         perror("fopen nvidia");
         return;
     }
-    int brightness_nvidia;
+    
+    int brightness_nvidia, brightness_amd;
     if (fscanf(fp, "%d", &brightness_nvidia) == EOF) {
         return;
     }
-    int brightness_amd = 255 * brightness_nvidia / 100;
+    brightness_amd = 255 * brightness_nvidia / 100;
     fclose(fp);
 
     fp = fopen("/sys/class/backlight/amdgpu_bl0/brightness", "w");
@@ -34,43 +35,37 @@ int main() {
     
     int fd = inotify_init1(IN_NONBLOCK);
     if (fd == -1) {
-        perror("inotify_init1 failed");
-        fflush(stderr);
+        perror("inotify_init1");
         exit(EXIT_FAILURE);
     }
 
-    int wd = inotify_add_watch(fd, file_path, IN_CLOSE_WRITE);
-    if (wd == -1) {
-        perror("add watch");
+    if (inotify_add_watch(fd, file_path, IN_CLOSE_WRITE) == -1) {
+        perror("add_watch");
         exit(EXIT_FAILURE);
     }
+
     char buf[4096] 
         __attribute__ ((aligned(__alignof__(struct inotify_event))));
     const struct inotify_event *event;
     ssize_t len;
     
     struct epoll_event ev, events[1];
-    int nfds;
     int epfd = epoll_create1(0);
     if (epfd == -1) {
-        perror("epoll_create1 failed");
-        fflush(stderr);
+        perror("epoll_create1");
         exit(EXIT_FAILURE);
     }
 
     ev.events = EPOLLIN;
     ev.data.fd = fd;
     if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev) == -1) {
-        perror("epoll_ctl: listen_sock");
-        fflush(stderr);
+        perror("epoll_ctl");
         exit(EXIT_FAILURE);
     }
 
     for (;;) {
-        nfds = epoll_wait(epfd, events, 1, -1);
-        if (nfds == -1) {
+        if (epoll_wait(epfd, events, 1, -1) == -1) {
             perror("epoll_wait");
-            fflush(stderr);
             exit(EXIT_FAILURE);
         }
         
