@@ -9,4 +9,4 @@ build: main.c
 	mv ./brightness_sync ./target/brightness_sync  
 
 clear: build
-	rm brightness_sync
+	rm ./target/brightness_sync
