@@ -28,6 +28,9 @@ void change_brightness();
 
 
 int main() {
+    while (access(nv_file_path, F_OK) == -1) sleep(1);
+
+
     char buf[4096] 
         __attribute__ ((aligned(__alignof__(struct inotify_event))));
     const struct inotify_event *inotify_events;
@@ -49,9 +52,14 @@ int main() {
 
     int nr;
     for (;;) {
-        do {
-            nr = epoll_wait(epoll_fd, epoll_events, 1, -1);
-        } while (nr < 0 && errno == EINTR);
+        nr = epoll_wait(epoll_fd, epoll_events, 1, -1);
+        if (nr == -1 && errno == EINTR) {
+            execl("/proc/self/exe", "/proc/self/exe", NULL);
+            printf("FUCK!");
+            exit(1);
+        } else if (nr < 0) {
+            continue;
+        }
 
         len = read(fd, buf, sizeof(buf));
         if (len == -1) {
