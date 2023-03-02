@@ -10,7 +10,3 @@ release:
 	gcc -O3 main.c -o ./target/release/brightness_sync
 	sudo chown root ./target/release/brightness_sync
 	sudo chmod 4777 ./target/release/brightness_sync
-
-clear: build
-	rm ./target/debug/brightness_sync
-	rm ./target/release/brightness_sync
