@@ -7,7 +7,6 @@
 #include <sys/inotify.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 
 #define nv_file_path "/sys/class/backlight/nvidia_0/brightness"
@@ -72,6 +71,7 @@ int main() {
     return 0;
 }
 
+
 int init_inotify_fd(int *fd, int *wd, u_int32_t mask) {
     /*
         *fd: the file descriptor to be init
@@ -88,6 +88,7 @@ int init_inotify_fd(int *fd, int *wd, u_int32_t mask) {
     }
     return 0;
 }
+
 
 int init_epoll_fd(int *epoll_fd, int fd) {
     /*
@@ -108,6 +109,7 @@ int init_epoll_fd(int *epoll_fd, int fd) {
     return 0;
 }
 
+
 int get_inode(int fd) {
     struct stat file_stat;
     if (fstat(fd, &file_stat) < 0) {
@@ -115,6 +117,7 @@ int get_inode(int fd) {
     }
     return file_stat.st_ino;
 }
+
 
 bool check_inotify_event(char* buf, ssize_t len, const struct inotify_event* inotify_events, u_int32_t mask) {
     for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + inotify_events->len) {
