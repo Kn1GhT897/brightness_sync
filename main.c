@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -7,119 +6,96 @@
 #include <sys/inotify.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
+#include <stdlib.h>
 
+#define BUFFER_SIZE 4096
+#define NV_FILE_PATH "/sys/class/backlight/nvidia_0/brightness"
+#define AMD_FILE_PATH "/sys/class/backlight/amdgpu_bl0/brightness"
 
-#define nv_file_path "/sys/class/backlight/nvidia_0/brightness"
-#define amd_file_path "/sys/class/backlight/amdgpu_bl0/brightness"
-#define _throw_return(info, return_val...) \
-    perror(info); \
-    return return_val;
-#define _throw_exit(info) \
-    perror(info); \
-    exit(EXIT_FAILURE);
-
-
-int init_inotify_fd(int*, int*, u_int32_t);
-int init_epoll_fd(int*, int);
-int get_inode(int);
-bool check_inotify_event(char*, ssize_t, const struct inotify_event*, u_int32_t);
-void change_brightness();
-
+int init_inotify_fd(const char* path, uint32_t mask);
+int init_epoll_fd(int fd);
+bool check_inotify_event(char* buf, ssize_t len, const struct inotify_event* inotify_events, uint32_t mask);
+void change_brightness(FILE* fp_nv, FILE* fp_amd);
 
 int main() {
-    while (access(nv_file_path, F_OK) == -1) sleep(1);
+    while (access(NV_FILE_PATH, F_OK) == -1) sleep(1);
 
-    char buf[4096] 
-        __attribute__ ((aligned(__alignof__(struct inotify_event))));
-    const struct inotify_event *inotify_events;
-    ssize_t len;
-
+    int inotify_fd = init_inotify_fd(NV_FILE_PATH, IN_CLOSE_WRITE);
+    int epoll_fd = init_epoll_fd(inotify_fd);
+    uint32_t mask = IN_CLOSE_WRITE;
     struct epoll_event epoll_events[1];
-
-    int fd, wd, inode;
-    u_int32_t mask = IN_CLOSE_WRITE;
-    if (init_inotify_fd(&fd, &wd, mask) == -1) {
-        return -1;
-    }
-    inode = get_inode(fd);
-
-    int epoll_fd;
-    if (init_epoll_fd(&epoll_fd, fd) == -1) {
-        return -1;
-    }
-
+    const struct inotify_event* inotify_events;
+    char buf[BUFFER_SIZE] __attribute__ ((aligned(__alignof__(struct inotify_event))));
+    ssize_t len;
     int nr;
     for (;;) {
         nr = epoll_wait(epoll_fd, epoll_events, 1, -1);
         if (nr < 0) {
             if (errno == EINTR) {
                 execl("/proc/self/exe", "/proc/self/exe", NULL);
-                exit(1);
+                exit(EXIT_FAILURE);
             }
             continue;
         }
-
-        len = read(fd, buf, sizeof(buf));
+        len = read(inotify_fd, buf, BUFFER_SIZE);
         if (len == -1) {
             continue;
         }
-        
         if (check_inotify_event(buf, len, inotify_events, mask)) {
-            change_brightness();
+            FILE* fp_nv = fopen(NV_FILE_PATH, "r");
+            if (fp_nv == NULL) {
+                perror("fopen nvidia");
+                continue;
+            }
+            FILE* fp_amd = fopen(AMD_FILE_PATH, "w");
+            if (fp_amd == NULL) {
+                perror("fopen amd");
+                fclose(fp_nv);
+                continue;
+            }
+            change_brightness(fp_nv, fp_amd);
+            fclose(fp_nv);
+            fclose(fp_amd);
         }
     }
     return 0;
 }
 
-
-int init_inotify_fd(int *fd, int *wd, u_int32_t mask) {
-    /*
-        *fd: the file descriptor to be init
-        *wd: the watch descriptor to be init
-        mask: inotify mask
-    */
-    *fd = inotify_init1(IN_NONBLOCK);
-    if (*fd == -1) {
-        _throw_return("inotify_init1", -1);
+int init_inotify_fd(const char* path, uint32_t mask) {
+    int inotify_fd = inotify_init1(IN_NONBLOCK);
+    if (inotify_fd == -1) {
+        perror("inotify_init1");
+        return -1;
     }
-    *wd = inotify_add_watch(*fd, nv_file_path, mask);
-    if (*wd == -1) {
-        _throw_return("inotify_add_watch", -1);
+    int wd = inotify_add_watch(inotify_fd, path, mask);
+    if (wd == -1) {
+        perror("inotify_add_watch");
+        close(inotify_fd);
+        return -1;
     }
-    return 0;
+    return inotify_fd;
 }
 
-
-int init_epoll_fd(int *epoll_fd, int fd) {
-    /*
-        *epoll_fd: as its name
-        fd: as its name 
-    */
-    struct epoll_event ev;
-    *epoll_fd = epoll_create1(0);
-    if (*epoll_fd == -1) {
-        _throw_return("epoll_create1", -1);
+int init_epoll_fd(int fd) {
+    int epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        perror("epoll_create1");
+        close(fd);
+        return -1;
     }
-
+    struct epoll_event ev;
     ev.events = EPOLLIN;
     ev.data.fd = fd;
-    if (epoll_ctl(*epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
-        _throw_return("epoll_ctl", -1);
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
+        perror("epoll_ctl");
+        close(epoll_fd);
+        close(fd);
+        return -1;
     }
-    return 0;
+    return epoll_fd;
 }
 
-
-int get_inode(int fd) {
-    struct stat file_stat;
-    if (fstat(fd, &file_stat) < 0) {
-        _throw_exit("fstat");
-    }
-    return file_stat.st_ino;
-}
-
-
-bool check_inotify_event(char* buf, ssize_t len, const struct inotify_event* inotify_events, u_int32_t mask) {
+bool check_inotify_event(char* buf, ssize_t len, const struct inotify_event* inotify_events, uint32_t mask) {
     for (char *ptr = buf; ptr < buf + len; ptr += sizeof(struct inotify_event) + inotify_events->len) {
         inotify_events = (const struct inotify_event*) ptr;
         if (inotify_events->mask & mask) { 
@@ -129,25 +105,12 @@ bool check_inotify_event(char* buf, ssize_t len, const struct inotify_event* ino
     return false;
 }
 
-
-void change_brightness() {
-    FILE *fp = fopen(nv_file_path, "r");
-    if (fp == NULL) {
-        _throw_return("fopen nvidia");
-    }
-
+void change_brightness(FILE* fp_nv, FILE* fp_amd) {
     int brightness_nvidia, brightness_amd;
-    if (fscanf(fp, "%d", &brightness_nvidia) == EOF) {
+    if (fscanf(fp_nv, "%d", &brightness_nvidia) == EOF) {
         return;
     }
     brightness_amd = 255 * brightness_nvidia / 100;
-    fclose(fp);
-
-    fp = fopen(amd_file_path, "w");
-    if (fp == NULL) {
-        _throw_return("fopen amd");
-    }
-    fprintf(fp, "%d", brightness_amd);
-    fflush(fp);
-    fclose(fp);
+    fprintf(fp_amd, "%d", brightness_amd);
+    fflush(fp_amd);
 }
